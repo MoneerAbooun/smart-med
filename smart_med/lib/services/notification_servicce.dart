@@ -1,0 +1,328 @@
+import 'dart:math';
+
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+import 'package:timezone/data/latest.dart' as tz;
+import 'package:timezone/timezone.dart' as tz;
+
+class NotificationService {
+  static final FlutterLocalNotificationsPlugin
+  _flutterLocalNotificationsPlugin = FlutterLocalNotificationsPlugin();
+
+  static bool _isInitialized = false;
+  static final Random _random = Random();
+
+  static const AndroidNotificationDetails _androidDetails =
+      AndroidNotificationDetails(
+        'med_channel',
+        'Medication Reminders',
+        channelDescription: 'Medication reminder notifications',
+        importance: Importance.max,
+        priority: Priority.high,
+      );
+
+  static const NotificationDetails _notificationDetails = NotificationDetails(
+    android: _androidDetails,
+  );
+
+  static Future<void> init() async {
+    if (_isInitialized) return;
+
+    tz.initializeTimeZones();
+    tz.setLocalLocation(tz.getLocation('Asia/Hebron'));
+
+    const AndroidInitializationSettings androidSettings =
+        AndroidInitializationSettings('@mipmap/ic_launcher');
+
+    const InitializationSettings settings = InitializationSettings(
+      android: androidSettings,
+    );
+
+    await _flutterLocalNotificationsPlugin.initialize(settings);
+    _isInitialized = true;
+  }
+
+  static Future<bool> requestPermission() async {
+    final AndroidFlutterLocalNotificationsPlugin? androidImplementation =
+        _flutterLocalNotificationsPlugin
+            .resolvePlatformSpecificImplementation<
+              AndroidFlutterLocalNotificationsPlugin
+            >();
+
+    final bool? granted = await androidImplementation
+        ?.requestNotificationsPermission();
+
+    return granted ?? false;
+  }
+
+  static Future<void> showInstantNotification({
+    required String title,
+    required String body,
+  }) async {
+    await _flutterLocalNotificationsPlugin.show(
+      generateNotificationId(),
+      title,
+      body,
+      _notificationDetails,
+    );
+  }
+
+  static int generateNotificationId() {
+    final int timestamp = DateTime.now().millisecondsSinceEpoch % 1000000;
+    final int randomPart = _random.nextInt(999);
+    return int.parse('$timestamp$randomPart'.substring(0, 9));
+  }
+
+  static int generateStableNotificationId({
+    required String userId,
+    required String medicationKey,
+    required int index,
+    required String timeString,
+  }) {
+    final String source = '${userId}_${medicationKey}_${index}_${timeString.trim()}';
+    int hash = 0;
+
+    for (int i = 0; i < source.length; i++) {
+      hash = ((hash * 31) + source.codeUnitAt(i)) & 0x7fffffff;
+    }
+
+    return hash == 0 ? index + 1 : hash;
+  }
+
+  static Future<void> scheduleDailyMedicationReminder({
+    required int id,
+    required String medicineName,
+    required String timeString,
+    DateTime? startDate,
+    String? body,
+  }) async {
+    final TimeOfDay parsedTime = _parseTimeString(timeString);
+    final tz.TZDateTime scheduledDate = _nextInstanceOfTime(
+      parsedTime,
+      startDate: startDate,
+    );
+
+    await _flutterLocalNotificationsPlugin.zonedSchedule(
+      id,
+      'Medication Reminder',
+      body ?? 'Time to take $medicineName',
+      scheduledDate,
+      _notificationDetails,
+      uiLocalNotificationDateInterpretation:
+          UILocalNotificationDateInterpretation.absoluteTime,
+      androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
+      matchDateTimeComponents: DateTimeComponents.time,
+    );
+  }
+
+  static Future<List<int>> scheduleMedicationReminders({
+    required String medicineName,
+    required List<String> times,
+    String? body,
+    String? userId,
+    String? medicationId,
+    DateTime? startDate,
+  }) async {
+    final String? effectiveUserId = userId ?? FirebaseAuth.instance.currentUser?.uid;
+    final String medicationKey = (medicationId != null && medicationId.trim().isNotEmpty)
+        ? medicationId.trim()
+        : medicineName.trim();
+
+    final List<int> notificationIds = [];
+
+    for (int i = 0; i < times.length; i++) {
+      final String time = times[i].trim();
+
+      try {
+        final int id = effectiveUserId != null
+            ? generateStableNotificationId(
+                userId: effectiveUserId,
+                medicationKey: medicationKey,
+                index: i,
+                timeString: time,
+              )
+            : generateNotificationId();
+
+        await scheduleDailyMedicationReminder(
+          id: id,
+          medicineName: medicineName,
+          timeString: time,
+          startDate: startDate,
+          body: body,
+        );
+
+        notificationIds.add(id);
+      } catch (e) {
+        debugPrint('Failed to schedule reminder for time "$time": $e');
+      }
+    }
+
+    return notificationIds;
+  }
+
+  static Future<void> syncNotificationsForCurrentUser() async {
+    final User? user = FirebaseAuth.instance.currentUser;
+
+    await cancelAllNotifications();
+
+    if (user == null) {
+      return;
+    }
+
+    await restoreNotificationsForUser(user.uid);
+  }
+
+  static Future<void> restoreNotificationsForUser(String uid) async {
+    final QuerySnapshot<Map<String, dynamic>> snapshot = await FirebaseFirestore
+        .instance
+        .collection('Users')
+        .doc(uid)
+        .collection('medications')
+        .get();
+
+    for (final doc in snapshot.docs) {
+      final Map<String, dynamic> data = doc.data();
+      final String medicineName = (data['name'] ?? '').toString().trim();
+      final List<String> times = List<String>.from(data['times'] ?? []);
+      final bool remindersEnabled = data['remindersEnabled'] != false;
+
+      if (!remindersEnabled || medicineName.isEmpty || times.isEmpty) {
+        continue;
+      }
+
+      final DateTime? startDate = _parseStoredDate(data['startDate']);
+
+      final List<int> notificationIds = await scheduleMedicationReminders(
+        medicineName: medicineName,
+        times: times,
+        body: 'Time to take $medicineName',
+        userId: uid,
+        medicationId: doc.id,
+        startDate: startDate,
+      );
+
+      try {
+        await doc.reference.update({'notificationIds': notificationIds});
+      } catch (e) {
+        debugPrint('Failed to update notificationIds for ${doc.id}: $e');
+      }
+    }
+  }
+
+  static Future<void> cancelNotification(int id) async {
+    await _flutterLocalNotificationsPlugin.cancel(id);
+  }
+
+  static Future<void> cancelNotifications(List<dynamic> ids) async {
+    for (final dynamic id in ids) {
+      final int? parsedId = _toInt(id);
+      if (parsedId != null) {
+        await _flutterLocalNotificationsPlugin.cancel(parsedId);
+      }
+    }
+  }
+
+  static Future<void> cancelAllNotifications() async {
+    await _flutterLocalNotificationsPlugin.cancelAll();
+  }
+
+  static TimeOfDay _parseTimeString(String timeString) {
+    final String value = timeString.trim().toUpperCase();
+
+    final RegExp regex = RegExp(r'^(\d{1,2}):(\d{2})\s?(AM|PM)$');
+    final Match? match = regex.firstMatch(value);
+
+    if (match == null) {
+      throw FormatException('Invalid time format: $timeString');
+    }
+
+    int hour = int.parse(match.group(1)!);
+    final int minute = int.parse(match.group(2)!);
+    final String period = match.group(3)!;
+
+    if (hour < 1 || hour > 12 || minute < 0 || minute > 59) {
+      throw FormatException('Invalid time value: $timeString');
+    }
+
+    if (period == 'PM' && hour != 12) {
+      hour += 12;
+    } else if (period == 'AM' && hour == 12) {
+      hour = 0;
+    }
+
+    return TimeOfDay(hour: hour, minute: minute);
+  }
+
+  static tz.TZDateTime _nextInstanceOfTime(
+    TimeOfDay time, {
+    DateTime? startDate,
+  }) {
+    final tz.TZDateTime now = tz.TZDateTime.now(tz.local);
+
+    final DateTime baseDate = startDate ?? now;
+    tz.TZDateTime scheduledDate = tz.TZDateTime(
+      tz.local,
+      baseDate.year,
+      baseDate.month,
+      baseDate.day,
+      time.hour,
+      time.minute,
+    );
+
+    if (scheduledDate.isBefore(now)) {
+      scheduledDate = tz.TZDateTime(
+        tz.local,
+        now.year,
+        now.month,
+        now.day,
+        time.hour,
+        time.minute,
+      );
+
+      if (scheduledDate.isBefore(now)) {
+        scheduledDate = scheduledDate.add(const Duration(days: 1));
+      }
+    }
+
+    return scheduledDate;
+  }
+
+  static DateTime? _parseStoredDate(dynamic value) {
+    if (value == null) return null;
+
+    if (value is Timestamp) {
+      return value.toDate();
+    }
+
+    if (value is DateTime) {
+      return value;
+    }
+
+    if (value is String) {
+      return DateTime.tryParse(value.trim());
+    }
+
+    return null;
+  }
+
+  static int? _toInt(dynamic value) {
+    if (value is int) return value;
+    if (value is String) return int.tryParse(value);
+    return null;
+  }
+
+  static Future<void> printPendingNotifications() async {
+    final pending = await _flutterLocalNotificationsPlugin
+        .pendingNotificationRequests();
+
+    debugPrint('Pending count: ${pending.length}');
+
+    for (final item in pending) {
+      debugPrint(
+        'Pending -> id: ${item.id}, title: ${item.title}, body: ${item.body}',
+      );
+    }
+  }
+}
