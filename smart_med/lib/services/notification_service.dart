@@ -71,8 +71,9 @@ class NotificationService {
 
   static int generateNotificationId() {
     final int timestamp = DateTime.now().millisecondsSinceEpoch % 1000000;
-    final int randomPart = _random.nextInt(999);
-    return int.parse('$timestamp$randomPart'.substring(0, 9));
+    final int randomPart = _random.nextInt(1000);
+    final int id = (timestamp * 1000) + randomPart;
+    return id == 0 ? 1 : id;
   }
 
   static int generateStableNotificationId({

@@ -567,7 +567,7 @@ class _ExpandableDetailBoxState extends State<_ExpandableDetailBox> {
                           child: Row(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              const Text('• '),
+                              const Text('- '),
                               Expanded(
                                 child: Text(
                                   item,

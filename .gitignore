@@ -1,0 +1,21 @@
+# Archives and generated caches
+*.zip
+__pycache__/
+*.py[cod]
+
+# Local Python environments
+.venv/
+venv/
+env/
+
+# Flutter/Dart generated output
+**/.dart_tool/
+**/build/
+**/coverage/
+**/.flutter-plugins-dependencies
+
+# IDE and OS files
+.idea/
+*.iml
+.DS_Store
+Thumbs.db

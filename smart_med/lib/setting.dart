@@ -1,7 +1,7 @@
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:smart_med/medication_list.dart';
-import 'package:smart_med/services/notification_servicce.dart';
+import 'package:smart_med/services/notification_service.dart';
 
 class Setting extends StatefulWidget {
   final VoidCallback onEditProfileTap;

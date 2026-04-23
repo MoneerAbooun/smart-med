@@ -1,4 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:smart_med/drug_detail.dart';
+import 'package:smart_med/models/drug_alternatives_response.dart';
+import 'package:smart_med/services/drug_alternatives_api_service.dart';
 
 class AlternativePage extends StatefulWidget {
   final String searchedDrugName;
@@ -15,19 +18,35 @@ class AlternativePage extends StatefulWidget {
 }
 
 class _AlternativePageState extends State<AlternativePage> {
+  final DrugAlternativesApiService _alternativesApiService =
+      DrugAlternativesApiService();
+
   late TextEditingController searchController;
 
   bool hasSearched = false;
   bool isLoading = false;
-
-  List<String> alternatives = [];
-  String activeIngredient = '';
-  String notes = '';
+  String? errorMessage;
+  DrugAlternativesResponse? result;
 
   @override
   void initState() {
     super.initState();
     searchController = TextEditingController(text: widget.searchedDrugName);
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final query = widget.searchedDrugName.trim();
+      final hasImage = widget.imagePath != null && widget.imagePath!.isNotEmpty;
+
+      if (query.isNotEmpty) {
+        searchMedicine();
+      } else if (hasImage && mounted) {
+        setState(() {
+          hasSearched = true;
+          errorMessage =
+              'Image-only lookup is not connected yet. Please type the medicine name to fetch real alternatives.';
+        });
+      }
+    });
   }
 
   @override
@@ -49,21 +68,77 @@ class _AlternativePageState extends State<AlternativePage> {
     setState(() {
       hasSearched = true;
       isLoading = true;
-
-      // مؤقتًا نخلي القيم فاضية
-      // لاحقًا أنت اربطها مع Firebase / API / database
-      alternatives = [];
-      activeIngredient = '';
-      notes = '';
+      errorMessage = null;
+      result = null;
     });
 
-    await Future.delayed(const Duration(milliseconds: 300));
+    try {
+      final alternatives = await _alternativesApiService.fetchDrugAlternatives(
+        query,
+      );
 
-    if (!mounted) return;
+      if (!mounted) return;
 
-    setState(() {
-      isLoading = false;
-    });
+      setState(() {
+        result = alternatives;
+        isLoading = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+
+      setState(() {
+        errorMessage = e.toString().replaceFirst('Exception: ', '');
+        isLoading = false;
+      });
+    }
+  }
+
+  String _normalizeText(String input) {
+    return input.replaceAll(RegExp(r'\s+'), ' ').trim();
+  }
+
+  List<String> _cleanSectionItems(List<String> rawItems, {int maxItems = 6}) {
+    if (rawItems.isEmpty) return [];
+
+    final combined = _normalizeText(rawItems.join(' '));
+
+    final parts = combined
+        .split(RegExp(r'(?<=[.;:])\s+'))
+        .map(_normalizeText)
+        .where((item) => item.isNotEmpty)
+        .toList();
+
+    final cleaned = <String>[];
+    final seen = <String>{};
+
+    for (final item in parts) {
+      final lower = item.toLowerCase();
+
+      if (item.length < 3) continue;
+      if (seen.contains(lower)) continue;
+
+      seen.add(lower);
+      cleaned.add(item);
+
+      if (cleaned.length >= maxItems) break;
+    }
+
+    return cleaned;
+  }
+
+  String _displayDrugName() {
+    final matchedName = result?.matchedName?.trim();
+    final searchedName = searchController.text.trim();
+
+    if (matchedName != null && matchedName.isNotEmpty) {
+      return matchedName;
+    }
+
+    if (searchedName.isNotEmpty) {
+      return searchedName;
+    }
+
+    return 'Medicine Alternatives';
   }
 
   Widget buildTopCard(BuildContext context) {
@@ -77,6 +152,7 @@ class _AlternativePageState extends State<AlternativePage> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Container(
                   width: 58,
@@ -93,12 +169,33 @@ class _AlternativePageState extends State<AlternativePage> {
                 ),
                 const SizedBox(width: 12),
                 Expanded(
-                  child: Text(
-                    'Search for medicine alternatives, active ingredient, and important notes.',
-                    style: theme.textTheme.bodyLarge?.copyWith(
-                      fontWeight: FontWeight.w600,
-                      color: colorScheme.onSurface,
-                    ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        _displayDrugName(),
+                        style: theme.textTheme.titleLarge,
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        result == null
+                            ? 'Find related brands and generic products.'
+                            : 'Source: ${result!.source}',
+                        style: theme.textTheme.bodyMedium?.copyWith(
+                          color: colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                      if (result?.rxcui != null &&
+                          result!.rxcui!.isNotEmpty) ...[
+                        const SizedBox(height: 4),
+                        Text(
+                          'RXCUI: ${result!.rxcui!}',
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: colorScheme.onSurfaceVariant,
+                          ),
+                        ),
+                      ],
+                    ],
                   ),
                 ),
               ],
@@ -152,12 +249,14 @@ class _AlternativePageState extends State<AlternativePage> {
             children: [
               Icon(icon, size: 20, color: colorScheme.primary),
               const SizedBox(width: 8),
-              Text(
-                title,
-                style: TextStyle(
-                  fontSize: 17,
-                  fontWeight: FontWeight.bold,
-                  color: colorScheme.onSurface,
+              Expanded(
+                child: Text(
+                  title,
+                  style: TextStyle(
+                    fontSize: 17,
+                    fontWeight: FontWeight.bold,
+                    color: colorScheme.onSurface,
+                  ),
                 ),
               ),
             ],
@@ -173,7 +272,20 @@ class _AlternativePageState extends State<AlternativePage> {
     final colorScheme = Theme.of(context).colorScheme;
 
     if (isLoading) {
-      return const Center(child: CircularProgressIndicator());
+      return const Padding(
+        padding: EdgeInsets.symmetric(vertical: 18),
+        child: Center(child: CircularProgressIndicator()),
+      );
+    }
+
+    if (errorMessage != null) {
+      return _StatusBox(
+        icon: Icons.error_outline,
+        title: 'Unable to load alternatives',
+        message: errorMessage!,
+        buttonText: 'Retry',
+        onPressed: searchMedicine,
+      );
     }
 
     if (!hasSearched) {
@@ -183,6 +295,8 @@ class _AlternativePageState extends State<AlternativePage> {
       );
     }
 
+    final alternatives = result?.alternatives ?? [];
+
     if (alternatives.isEmpty) {
       return Text(
         'No alternatives available.',
@@ -190,31 +304,37 @@ class _AlternativePageState extends State<AlternativePage> {
       );
     }
 
-    return Wrap(
-      spacing: 10,
-      runSpacing: 10,
-      children: alternatives.map((item) {
-        return Container(
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-          decoration: BoxDecoration(
-            color: colorScheme.surface,
-            borderRadius: BorderRadius.circular(14),
-            border: Border.all(color: colorScheme.outlineVariant),
-          ),
-          child: Text(
-            item,
-            style: TextStyle(
-              color: colorScheme.onSurface,
-              fontWeight: FontWeight.w600,
+    return Column(
+      children: alternatives
+          .map(
+            (item) => Padding(
+              padding: const EdgeInsets.only(bottom: 10),
+              child: _AlternativeTile(
+                item: item,
+                onDetailsPressed: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => DrugDetailPage(
+                        searchedDrugName: item.name,
+                      ),
+                    ),
+                  );
+                },
+              ),
             ),
-          ),
-        );
-      }).toList(),
+          )
+          .toList(),
     );
   }
 
-  Widget buildTextBox(BuildContext context, String text) {
+  Widget buildTextListBox(
+    BuildContext context, {
+    required List<String> items,
+    required String fallback,
+  }) {
     final colorScheme = Theme.of(context).colorScheme;
+    final visibleItems = _cleanSectionItems(items);
 
     return Container(
       width: double.infinity,
@@ -224,19 +344,49 @@ class _AlternativePageState extends State<AlternativePage> {
         borderRadius: BorderRadius.circular(14),
         border: Border.all(color: colorScheme.outlineVariant),
       ),
-      child: Text(
-        text,
-        style: TextStyle(
-          fontSize: 15,
-          height: 1.4,
-          color: colorScheme.onSurface,
-        ),
-      ),
+      child: visibleItems.isEmpty
+          ? Text(
+              fallback,
+              style: TextStyle(
+                fontSize: 15,
+                height: 1.4,
+                color: colorScheme.onSurfaceVariant,
+              ),
+            )
+          : Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: visibleItems
+                  .map(
+                    (item) => Padding(
+                      padding: const EdgeInsets.only(bottom: 8),
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text('- '),
+                          Expanded(
+                            child: Text(
+                              item,
+                              style: TextStyle(
+                                fontSize: 15,
+                                height: 1.4,
+                                color: colorScheme.onSurface,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  )
+                  .toList(),
+            ),
     );
   }
 
   @override
   Widget build(BuildContext context) {
+    final activeIngredients = result?.activeIngredients ?? [];
+    final notes = result?.notes ?? [];
+
     return Scaffold(
       appBar: AppBar(
         toolbarHeight: 70,
@@ -258,7 +408,6 @@ class _AlternativePageState extends State<AlternativePage> {
               children: [
                 buildTopCard(context),
                 const SizedBox(height: 16),
-
                 buildSection(
                   context: context,
                   title: 'Alternatives',
@@ -266,37 +415,167 @@ class _AlternativePageState extends State<AlternativePage> {
                   child: buildAlternativesContent(context),
                 ),
                 const SizedBox(height: 14),
-
                 buildSection(
                   context: context,
                   title: 'Active Ingredient',
                   icon: Icons.science_outlined,
-                  child: buildTextBox(
+                  child: buildTextListBox(
                     context,
-                    !hasSearched
+                    items: activeIngredients,
+                    fallback: !hasSearched
                         ? 'The active ingredient will appear here.'
-                        : (activeIngredient.isEmpty
-                              ? 'No active ingredient available.'
-                              : activeIngredient),
+                        : 'No active ingredient available.',
                   ),
                 ),
                 const SizedBox(height: 14),
-
                 buildSection(
                   context: context,
                   title: 'Notes',
                   icon: Icons.info_outline_rounded,
-                  child: buildTextBox(
+                  child: buildTextListBox(
                     context,
-                    !hasSearched
+                    items: notes,
+                    fallback: !hasSearched
                         ? 'Important notes about the medicine will appear here.'
-                        : (notes.isEmpty ? 'No notes available.' : notes),
+                        : 'No notes available.',
                   ),
                 ),
               ],
             ),
           ),
         ),
+      ),
+    );
+  }
+}
+
+class _AlternativeTile extends StatelessWidget {
+  final DrugAlternativeItem item;
+  final VoidCallback onDetailsPressed;
+
+  const _AlternativeTile({
+    required this.item,
+    required this.onDetailsPressed,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: colorScheme.surface.withValues(alpha: 0.55),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: colorScheme.outlineVariant),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(
+            Icons.local_pharmacy_outlined,
+            color: colorScheme.primary,
+            size: 22,
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  item.name,
+                  style: theme.textTheme.bodyLarge?.copyWith(
+                    color: colorScheme.onSurface,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const SizedBox(height: 5),
+                Text(
+                  item.termType == null || item.termType!.isEmpty
+                      ? item.category
+                      : '${item.category} | ${item.termType}',
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: colorScheme.onSurfaceVariant,
+                  ),
+                ),
+                if (item.rxcui != null && item.rxcui!.isNotEmpty) ...[
+                  const SizedBox(height: 3),
+                  Text(
+                    'RXCUI: ${item.rxcui}',
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+          IconButton(
+            onPressed: onDetailsPressed,
+            tooltip: 'View details',
+            icon: const Icon(Icons.info_outline),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _StatusBox extends StatelessWidget {
+  final IconData icon;
+  final String title;
+  final String message;
+  final String buttonText;
+  final VoidCallback onPressed;
+
+  const _StatusBox({
+    required this.icon,
+    required this.title,
+    required this.message,
+    required this.buttonText,
+    required this.onPressed,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: colorScheme.surface.withValues(alpha: 0.50),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: colorScheme.outlineVariant),
+      ),
+      child: Column(
+        children: [
+          Icon(icon, size: 32, color: colorScheme.primary),
+          const SizedBox(height: 8),
+          Text(
+            title,
+            style: TextStyle(
+              fontSize: 16,
+              fontWeight: FontWeight.bold,
+              color: colorScheme.onSurface,
+            ),
+            textAlign: TextAlign.center,
+          ),
+          const SizedBox(height: 8),
+          Text(
+            message,
+            style: TextStyle(
+              fontSize: 14,
+              height: 1.4,
+              color: colorScheme.onSurfaceVariant,
+            ),
+            textAlign: TextAlign.center,
+          ),
+          const SizedBox(height: 12),
+          ElevatedButton(onPressed: onPressed, child: Text(buttonText)),
+        ],
       ),
     );
   }

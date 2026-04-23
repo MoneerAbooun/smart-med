@@ -735,7 +735,7 @@ class _SectionBox extends StatelessWidget {
                 child: Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text('• '),
+                    const Text('- '),
                     Expanded(
                       child: Text(
                         item,
@@ -827,7 +827,7 @@ class _ExpandableSectionBoxState extends State<_ExpandableSectionBox> {
                 child: Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text('• '),
+                    const Text('- '),
                     Expanded(
                       child: Text(
                         item,

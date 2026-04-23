@@ -1,0 +1,12 @@
+# Python generated files
+__pycache__/
+*.py[cod]
+
+# Local environments
+.venv/
+venv/
+env/
+
+# Local archives and logs
+*.zip
+*.log

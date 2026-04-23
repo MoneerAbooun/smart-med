@@ -4,7 +4,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:smart_med/edit_medication.dart';
-import 'package:smart_med/services/notification_servicce.dart';
+import 'package:smart_med/services/notification_service.dart';
 import 'add_medication.dart';
 
 class MedicationListPage extends StatelessWidget {
