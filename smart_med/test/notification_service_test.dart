@@ -1,5 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:smart_med/services/notification_service.dart';
+import 'package:smart_med/core/services/notification_service.dart';
 
 void main() {
   test('generateNotificationId returns a valid Android notification id', () {
