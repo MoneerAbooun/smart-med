@@ -6,6 +6,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:smart_med/features/ai/ai.dart';
+import 'package:smart_med/features/interactions/interactions.dart';
 import 'package:smart_med/features/medications/medications.dart';
 import 'package:smart_med/features/profile/profile.dart';
 
@@ -79,14 +80,23 @@ class _HomePageState extends State<HomePage> {
     });
   }
 
-  Future<void> _openAiGuide({List<String> medicationIds = const <String>[]}) async {
+  Future<void> _openAiGuide({
+    List<String> medicationIds = const <String>[],
+  }) async {
     await Navigator.push(
       context,
       MaterialPageRoute(
-        builder: (context) => AiMedicationExplanationPage(
-          medicationIds: medicationIds,
-        ),
+        builder: (context) =>
+            AiMedicationExplanationPage(medicationIds: medicationIds),
       ),
+    );
+    _refreshSafetyBrief();
+  }
+
+  Future<void> _openInteractionChecker() async {
+    await Navigator.push(
+      context,
+      MaterialPageRoute(builder: (context) => const CheckInteractionsPage()),
     );
     _refreshSafetyBrief();
   }
@@ -94,9 +104,7 @@ class _HomePageState extends State<HomePage> {
   Future<void> _openMedicationList() async {
     await Navigator.push(
       context,
-      MaterialPageRoute(
-        builder: (context) => const MedicationListPage(),
-      ),
+      MaterialPageRoute(builder: (context) => const MedicationListPage()),
     );
     _refreshSafetyBrief();
   }
@@ -104,11 +112,32 @@ class _HomePageState extends State<HomePage> {
   Future<void> _openAddMedication() async {
     await Navigator.push(
       context,
-      MaterialPageRoute(
-        builder: (context) => const AddMedicationPage(),
-      ),
+      MaterialPageRoute(builder: (context) => const AddMedicationPage()),
     );
     _refreshSafetyBrief();
+  }
+
+  Future<void> _continueWithSelectedImage() async {
+    final image = selectedImage;
+    if (image == null) {
+      return;
+    }
+
+    final saved = await Navigator.push<bool>(
+      context,
+      MaterialPageRoute(
+        builder: (context) => AddMedicationPage(initialMedicationImage: image),
+      ),
+    );
+
+    if (!mounted) {
+      return;
+    }
+
+    if (saved == true) {
+      await backToPlaceholder();
+      _refreshSafetyBrief();
+    }
   }
 
   Future<void> _setupCamera() async {
@@ -286,7 +315,7 @@ class _HomePageState extends State<HomePage> {
                     Padding(
                       padding: const EdgeInsets.symmetric(horizontal: 32),
                       child: Text(
-                        'This is ready for the Firebase Storage step next. The old API-based drug lookup flow has been removed from this screen.',
+                        'Choose a photo here, then continue to Add Medication to save it with the medicine record.',
                         textAlign: TextAlign.center,
                         style: textTheme.bodyMedium?.copyWith(
                           color: colorScheme.onSurfaceVariant,
@@ -411,9 +440,9 @@ class _HomePageState extends State<HomePage> {
               children: [
                 Text(
                   'Today\'s AI Safety Brief',
-                  style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                    fontWeight: FontWeight.bold,
-                  ),
+                  style: Theme.of(
+                    context,
+                  ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold),
                 ),
                 const SizedBox(height: 8),
                 Text(
@@ -423,7 +452,9 @@ class _HomePageState extends State<HomePage> {
                 ),
                 const SizedBox(height: 14),
                 ElevatedButton(
-                  onPressed: noMedicationMatch ? _openAddMedication : _refreshSafetyBrief,
+                  onPressed: noMedicationMatch
+                      ? _openAddMedication
+                      : _refreshSafetyBrief,
                   child: Text(noMedicationMatch ? 'Add Medication' : 'Retry'),
                 ),
               ],
@@ -463,9 +494,8 @@ class _HomePageState extends State<HomePage> {
                       children: [
                         Text(
                           'Today\'s AI Safety Brief',
-                          style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                            fontWeight: FontWeight.bold,
-                          ),
+                          style: Theme.of(context).textTheme.titleLarge
+                              ?.copyWith(fontWeight: FontWeight.bold),
                         ),
                         const SizedBox(height: 8),
                         Text(
@@ -545,9 +575,9 @@ class _HomePageState extends State<HomePage> {
           const SizedBox(width: 8),
           Text(
             '$label: $value',
-            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-              fontWeight: FontWeight.w600,
-            ),
+            style: Theme.of(
+              context,
+            ).textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w600),
           ),
         ],
       ),
@@ -634,6 +664,12 @@ class _HomePageState extends State<HomePage> {
                           icon: const Icon(Icons.camera),
                           label: Text(isCapturing ? 'Capturing...' : 'Capture'),
                         ),
+                      if (selectedImage != null)
+                        ElevatedButton.icon(
+                          onPressed: _continueWithSelectedImage,
+                          icon: const Icon(Icons.upload_file_outlined),
+                          label: const Text('Use in Add Medication'),
+                        ),
                     ],
                   ),
                   const SizedBox(height: 14),
@@ -647,7 +683,9 @@ class _HomePageState extends State<HomePage> {
                           decoration: BoxDecoration(
                             color: colorScheme.surfaceContainerHighest,
                             borderRadius: BorderRadius.circular(18),
-                            border: Border.all(color: colorScheme.outlineVariant),
+                            border: Border.all(
+                              color: colorScheme.outlineVariant,
+                            ),
                           ),
                           child: Row(
                             children: [
@@ -658,7 +696,7 @@ class _HomePageState extends State<HomePage> {
                               const SizedBox(width: 10),
                               Expanded(
                                 child: Text(
-                                  'Image selected and ready for the Firebase Storage upload step.',
+                                  'Image selected and ready for upload.',
                                   style: textTheme.bodyMedium,
                                 ),
                               ),
@@ -679,8 +717,8 @@ class _HomePageState extends State<HomePage> {
                         icon: Icons.compare_arrows_outlined,
                         title: 'Check Interactions',
                         subtitle:
-                            'Review grounded interaction summaries across your saved medications.',
-                        onTap: _openAiGuide,
+                            'Enter two medicine names and check them with real backend data.',
+                        onTap: _openInteractionChecker,
                       ),
                       const SizedBox(height: 12),
                       _buildQuickAction(

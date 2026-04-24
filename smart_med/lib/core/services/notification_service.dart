@@ -5,6 +5,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:smart_med/core/firebase/firestore_paths.dart';
+import 'package:smart_med/core/services/notification_preferences_repository.dart';
 import 'package:timezone/data/latest.dart' as tz;
 import 'package:timezone/timezone.dart' as tz;
 
@@ -62,6 +63,10 @@ class NotificationService {
     required String title,
     required String body,
   }) async {
+    if (!await areNotificationsEnabled()) {
+      return;
+    }
+
     await _flutterLocalNotificationsPlugin.show(
       generateNotificationId(),
       title,
@@ -127,6 +132,10 @@ class NotificationService {
     String? medicationId,
     DateTime? startDate,
   }) async {
+    if (!await areNotificationsEnabled()) {
+      return const <int>[];
+    }
+
     final String? effectiveUserId = userId ?? FirebaseAuth.instance.currentUser?.uid;
     final String medicationKey = (medicationId != null && medicationId.trim().isNotEmpty)
         ? medicationId.trim()
@@ -174,6 +183,9 @@ class NotificationService {
 
   static Future<void> syncNotificationsForUserId(String? uid) async {
     await cancelAllNotifications();
+    if (!await areNotificationsEnabled()) {
+      return;
+    }
 
     final normalizedUid = uid?.trim();
     if (normalizedUid == null || normalizedUid.isEmpty) {
@@ -236,6 +248,21 @@ class NotificationService {
 
   static Future<void> cancelAllNotifications() async {
     await _flutterLocalNotificationsPlugin.cancelAll();
+  }
+
+  static Future<bool> areNotificationsEnabled() {
+    return notificationPreferencesRepository.loadNotificationsEnabled();
+  }
+
+  static Future<void> setNotificationsEnabled(bool enabled) async {
+    await notificationPreferencesRepository.setNotificationsEnabled(enabled);
+
+    if (!enabled) {
+      await cancelAllNotifications();
+      return;
+    }
+
+    await syncNotificationsForCurrentUser();
   }
 
   static TimeOfDay _parseTimeString(String timeString) {

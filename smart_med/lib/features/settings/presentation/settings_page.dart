@@ -30,16 +30,20 @@ class _SettingsPageState extends State<SettingsPage> {
   @override
   void initState() {
     super.initState();
-    _loadAiPreferences();
+    _loadPreferences();
   }
 
-  Future<void> _loadAiPreferences() async {
+  Future<void> _loadPreferences() async {
     final preferences = await aiPreferencesRepository.loadPreferences();
+    final notificationsAreEnabled =
+        await NotificationService.areNotificationsEnabled();
+
     if (!mounted) {
       return;
     }
 
     setState(() {
+      notificationsEnabled = notificationsAreEnabled;
       simpleLanguageMode = preferences.simpleLanguageMode;
       showSaferUseTips = preferences.showSaferUseTips;
       showQuestionsForClinician = preferences.showQuestionsForClinician;
@@ -201,6 +205,9 @@ class _SettingsPageState extends State<SettingsPage> {
                                 return;
                               }
 
+                              await NotificationService.setNotificationsEnabled(
+                                true,
+                              );
                               await NotificationService.showInstantNotification(
                                 title: 'Smart Med',
                                 body: 'This is a test notification',
@@ -214,10 +221,16 @@ class _SettingsPageState extends State<SettingsPage> {
 
                               ScaffoldMessenger.of(context).showSnackBar(
                                 const SnackBar(
-                                  content: Text('Test notification sent'),
+                                  content: Text(
+                                    'Notifications enabled and reminders synced',
+                                  ),
                                 ),
                               );
                             } else {
+                              await NotificationService.setNotificationsEnabled(
+                                false,
+                              );
+
                               setState(() {
                                 notificationsEnabled = false;
                               });
@@ -226,7 +239,9 @@ class _SettingsPageState extends State<SettingsPage> {
 
                               ScaffoldMessenger.of(context).showSnackBar(
                                 const SnackBar(
-                                  content: Text('Notifications turned off'),
+                                  content: Text(
+                                    'Notifications turned off and cleared',
+                                  ),
                                 ),
                               );
                             }

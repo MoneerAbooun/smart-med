@@ -25,6 +25,11 @@ service firebase.storage {
       allow write: if isOwner(userId) && isImageUpload();
     }
 
+    match /medication_images/{userId}/{fileName} {
+      allow read: if isOwner(userId);
+      allow write: if isOwner(userId) && isImageUpload();
+    }
+
     match /{allPaths=**} {
       allow read, write: if false;
     }

@@ -16,7 +16,14 @@ import 'package:smart_med/features/medications/domain/models/medication_schedule
 import 'package:smart_med/features/medications/presentation/widgets/safety_preview_sheet.dart';
 
 class AddMedicationPage extends StatefulWidget {
-  const AddMedicationPage({super.key});
+  const AddMedicationPage({
+    super.key,
+    this.initialMedicationImage,
+    this.initialMedicationImageBytes,
+  });
+
+  final XFile? initialMedicationImage;
+  final Uint8List? initialMedicationImageBytes;
 
   @override
   State<AddMedicationPage> createState() => _AddMedicationPageState();
@@ -60,6 +67,14 @@ class _AddMedicationPageState extends State<AddMedicationPage> {
     timesPerDay = 1;
     timesPerDayController.text = '1';
     timeControllers.add(TextEditingController());
+
+    _selectedMedicationImage = widget.initialMedicationImage;
+    _selectedMedicationImageBytes = widget.initialMedicationImageBytes;
+
+    if (_selectedMedicationImage != null &&
+        _selectedMedicationImageBytes == null) {
+      _loadInitialMedicationImageBytes();
+    }
   }
 
   @override
@@ -99,6 +114,22 @@ class _AddMedicationPageState extends State<AddMedicationPage> {
       border: OutlineInputBorder(borderRadius: BorderRadius.circular(14)),
       contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
     );
+  }
+
+  Future<void> _loadInitialMedicationImageBytes() async {
+    final image = _selectedMedicationImage;
+    if (image == null) {
+      return;
+    }
+
+    final bytes = await image.readAsBytes();
+    if (!mounted || _selectedMedicationImage != image) {
+      return;
+    }
+
+    setState(() {
+      _selectedMedicationImageBytes = bytes;
+    });
   }
 
   Future<void> _pickMedicationImage() async {
@@ -152,7 +183,7 @@ class _AddMedicationPageState extends State<AddMedicationPage> {
           ),
           const SizedBox(height: 6),
           Text(
-            'Optional. Save a pill, bottle, or package photo to Firebase Storage.',
+            'Optional. Save a pill, bottle, or package photo to the Smart Med server.',
             style: Theme.of(context).textTheme.bodyMedium?.copyWith(
               color: colorScheme.onSurfaceVariant,
             ),
@@ -334,6 +365,33 @@ class _AddMedicationPageState extends State<AddMedicationPage> {
         context,
       ).showSnackBar(SnackBar(content: Text(e.toString())));
       return false;
+    }
+  }
+
+  void _showMessage(String message) {
+    final messenger = ScaffoldMessenger.of(context);
+    messenger.hideCurrentSnackBar();
+    messenger.showSnackBar(SnackBar(content: Text(message)));
+  }
+
+  String _firebaseErrorMessage(
+    FirebaseException exception, {
+    required String fallbackMessage,
+  }) {
+    switch (exception.code.trim()) {
+      case 'permission-denied':
+        return 'You do not have permission to save this medication.';
+      case 'unauthenticated':
+        return 'Please sign in again before saving this medication.';
+      case 'unavailable':
+        return 'Firebase is temporarily unavailable. Please try again.';
+      default:
+        final message = exception.message?.trim();
+        if (message != null && message.isNotEmpty) {
+          return message;
+        }
+
+        return fallbackMessage;
     }
   }
 
@@ -575,17 +633,13 @@ class _AddMedicationPageState extends State<AddMedicationPage> {
     final user = FirebaseAuth.instance.currentUser;
 
     if (user == null) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('No logged in user found')));
+      _showMessage('Please sign in before uploading and saving medications.');
       return;
     }
 
     for (int i = 0; i < timeControllers.length; i++) {
       if (timeControllers[i].text.trim().isEmpty) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('Please select Time ${i + 1}')));
+        _showMessage('Please select Time ${i + 1}');
         return;
       }
     }
@@ -616,8 +670,6 @@ class _AddMedicationPageState extends State<AddMedicationPage> {
 
       if (_selectedMedicationImage != null) {
         imageUrl = await _imageStorageRepository.uploadMedicationImage(
-          uid: user.uid,
-          medicationId: medicationId,
           image: _selectedMedicationImage!,
         );
       }
@@ -634,6 +686,8 @@ class _AddMedicationPageState extends State<AddMedicationPage> {
         medicationId: medicationId,
       );
 
+      final notificationsEnabled =
+          await NotificationService.areNotificationsEnabled();
       List<int> notificationIds = [];
 
       notificationIds = await NotificationService.scheduleMedicationReminders(
@@ -657,41 +711,38 @@ class _AddMedicationPageState extends State<AddMedicationPage> {
 
       if (!mounted) return;
 
-      if (notificationIds.length == times.length) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Medication added successfully')),
+      if (!notificationsEnabled) {
+        _showMessage(
+          'Medication added successfully. Reminders are off in Settings.',
         );
+      } else if (notificationIds.length == times.length) {
+        _showMessage('Medication added successfully');
       } else if (notificationIds.isNotEmpty) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text(
-              'Medication added, but some reminders could not be scheduled.',
-            ),
-          ),
+        _showMessage(
+          'Medication added, but some reminders could not be scheduled.',
         );
       } else {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text(
-              'Medication added, but reminders could not be scheduled.',
-            ),
-          ),
-        );
+        _showMessage('Medication added, but reminders could not be scheduled.');
       }
 
-      Navigator.pop(context);
+      Navigator.pop(context, true);
+    } on ImageStorageRepositoryException catch (e) {
+      if (!mounted) return;
+
+      _showMessage(e.message);
     } on FirebaseException catch (e) {
       if (!mounted) return;
 
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text(e.message ?? 'Firestore error')));
+      _showMessage(
+        _firebaseErrorMessage(
+          e,
+          fallbackMessage: 'Could not save the medication right now.',
+        ),
+      );
     } catch (e) {
       if (!mounted) return;
 
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text(e.toString())));
+      _showMessage('Could not save the medication. ${e.toString()}');
     } finally {
       if (mounted) {
         setState(() {

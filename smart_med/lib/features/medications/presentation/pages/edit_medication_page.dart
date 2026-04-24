@@ -165,7 +165,7 @@ class _EditMedicationPageState extends State<EditMedicationPage> {
           ),
           const SizedBox(height: 6),
           Text(
-            'Optional. Updating the photo uploads a new file to Firebase Storage.',
+            'Optional. Updating the photo uploads a new file to the Smart Med server.',
             style: Theme.of(context).textTheme.bodyMedium?.copyWith(
               color: colorScheme.onSurfaceVariant,
             ),
@@ -343,6 +343,33 @@ class _EditMedicationPageState extends State<EditMedicationPage> {
     }
   }
 
+  void _showMessage(String message) {
+    final messenger = ScaffoldMessenger.of(context);
+    messenger.hideCurrentSnackBar();
+    messenger.showSnackBar(SnackBar(content: Text(message)));
+  }
+
+  String _firebaseErrorMessage(
+    FirebaseException exception, {
+    required String fallbackMessage,
+  }) {
+    switch (exception.code.trim()) {
+      case 'permission-denied':
+        return 'You do not have permission to update this medication.';
+      case 'unauthenticated':
+        return 'Please sign in again before updating this medication.';
+      case 'unavailable':
+        return 'Firebase is temporarily unavailable. Please try again.';
+      default:
+        final message = exception.message?.trim();
+        if (message != null && message.isNotEmpty) {
+          return message;
+        }
+
+        return fallbackMessage;
+    }
+  }
+
   Future<void> updateMedication() async {
     if (!_formKey.currentState!.validate()) return;
 
@@ -350,17 +377,13 @@ class _EditMedicationPageState extends State<EditMedicationPage> {
     final medicationId = widget.medication.id;
 
     if (user == null || medicationId == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Unable to update this medication')),
-      );
+      _showMessage('Please sign in again before updating this medication.');
       return;
     }
 
     for (int i = 0; i < timeControllers.length; i++) {
       if (timeControllers[i].text.trim().isEmpty) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('Please select Time ${i + 1}')));
+        _showMessage('Please select Time ${i + 1}');
         return;
       }
     }
@@ -388,8 +411,6 @@ class _EditMedicationPageState extends State<EditMedicationPage> {
 
       if (_selectedMedicationImage != null) {
         imageUrl = await _imageStorageRepository.uploadMedicationImage(
-          uid: user.uid,
-          medicationId: medicationId,
           image: _selectedMedicationImage!,
         );
       }
@@ -421,6 +442,8 @@ class _EditMedicationPageState extends State<EditMedicationPage> {
         medicationId: medicationId,
         medication: updatedMedication,
       );
+      final notificationsEnabled =
+          await NotificationService.areNotificationsEnabled();
       final List<int> newNotificationIds =
           await NotificationService.scheduleMedicationReminders(
             medicineName: updatedMedication.name,
@@ -441,41 +464,40 @@ class _EditMedicationPageState extends State<EditMedicationPage> {
 
       if (!mounted) return;
 
-      if (newNotificationIds.length == times.length) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Medication updated successfully')),
+      if (!notificationsEnabled) {
+        _showMessage(
+          'Medication updated successfully. Reminders are off in Settings.',
         );
+      } else if (newNotificationIds.length == times.length) {
+        _showMessage('Medication updated successfully');
       } else if (newNotificationIds.isNotEmpty) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text(
-              'Medication updated, but some reminders could not be scheduled.',
-            ),
-          ),
+        _showMessage(
+          'Medication updated, but some reminders could not be scheduled.',
         );
       } else {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text(
-              'Medication updated, but reminders could not be scheduled.',
-            ),
-          ),
+        _showMessage(
+          'Medication updated, but reminders could not be scheduled.',
         );
       }
 
       Navigator.pop(context);
+    } on ImageStorageRepositoryException catch (e) {
+      if (!mounted) return;
+
+      _showMessage(e.message);
     } on FirebaseException catch (e) {
       if (!mounted) return;
 
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text(e.message ?? 'Update failed')));
+      _showMessage(
+        _firebaseErrorMessage(
+          e,
+          fallbackMessage: 'Could not update the medication right now.',
+        ),
+      );
     } catch (e) {
       if (!mounted) return;
 
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text(e.toString())));
+      _showMessage('Could not update the medication. ${e.toString()}');
     } finally {
       if (mounted) {
         setState(() {
