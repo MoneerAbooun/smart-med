@@ -1,16 +1,19 @@
 from __future__ import annotations
 
+import asyncio
 import itertools
 import json
+import logging
 from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
 
-import httpx
 from fastapi import HTTPException, status
+from openai import APIConnectionError, APIError, APIStatusError, APITimeoutError
 
 from app.core.config import get_settings
+from app.core.xai_client import get_xai_client, response_output_text
 from app.models.personalized_explanation_models import (
     DraftMedicationInput,
     EvidenceItem,
@@ -29,6 +32,7 @@ from app.services.medication_safety_rules import (
 )
 
 PROMPT_VERSION = "grounded-firestore-v2"
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -947,24 +951,6 @@ def _explanation_schema() -> dict[str, Any]:
     }
 
 
-def _response_output_text(payload: dict[str, Any]) -> str | None:
-    direct_output_text = payload.get("output_text")
-    if isinstance(direct_output_text, str) and direct_output_text.strip():
-        return direct_output_text
-
-    for item in payload.get("output", []):
-        if not isinstance(item, dict):
-            continue
-        for content_item in item.get("content", []):
-            if not isinstance(content_item, dict):
-                continue
-            text = content_item.get("text")
-            if isinstance(text, str) and text.strip():
-                return text
-
-    return None
-
-
 def _fallback_response(grounded: GroundedFacts) -> PersonalizedExplanationResponse:
     return PersonalizedExplanationResponse(
         generated_at=datetime.now(timezone.utc),
@@ -1024,14 +1010,12 @@ def _merge_medication_explanations(
     return merged
 
 
-async def _generate_with_openai(
+async def _generate_with_xai(
     *,
     request: PersonalizedExplanationRequest,
     grounded: GroundedFacts,
 ) -> PersonalizedExplanationResponse:
     settings = get_settings()
-    if not settings.openai_api_key:
-        return _fallback_response(grounded)
 
     brevity_instruction = (
         "Use very simple language and short sentences."
@@ -1053,47 +1037,60 @@ async def _generate_with_openai(
         f"{brevity_instruction} {view_instruction}"
     )
 
-    request_payload = {
-        "model": settings.openai_model,
-        "input": [
-            {"role": "system", "content": system_prompt},
-            {
-                "role": "user",
-                "content": json.dumps(grounded.model_payload, ensure_ascii=False),
-            },
-        ],
-        "text": {
-            "format": {
-                "type": "json_schema",
-                "name": "smart_med_grounded_explanation",
-                "schema": _explanation_schema(),
-                "strict": True,
-            },
-        },
-    }
-
     try:
-        async with httpx.AsyncClient(timeout=settings.openai_timeout_seconds) as client:
-            response = await client.post(
-                f"{settings.openai_base_url.rstrip('/')}/responses",
-                headers={
-                    "Authorization": f"Bearer {settings.openai_api_key}",
-                    "Content-Type": "application/json",
-                },
-                json=request_payload,
-            )
-            response.raise_for_status()
-    except httpx.HTTPError:
+        client = get_xai_client()
+    except HTTPException as exc:
+        logger.warning(
+            "Falling back to grounded personalized explanation because the xAI "
+            "client is unavailable: %s",
+            exc.detail,
+        )
         return _fallback_response(grounded)
 
     try:
-        payload = response.json()
-        output_text = _response_output_text(payload)
+        response = await asyncio.to_thread(
+            client.responses.create,
+            model=settings.xai_model,
+            input=[
+                {"role": "system", "content": system_prompt},
+                {
+                    "role": "user",
+                    "content": json.dumps(grounded.model_payload, ensure_ascii=False),
+                },
+            ],
+            text={
+                "format": {
+                    "type": "json_schema",
+                    "name": "smart_med_grounded_explanation",
+                    "schema": _explanation_schema(),
+                    "strict": True,
+                },
+            },
+            store=False,
+        )
+    except (APIConnectionError, APITimeoutError, APIStatusError, APIError) as exc:
+        logger.warning(
+            "Falling back to grounded personalized explanation because the xAI "
+            "request failed.",
+            exc_info=exc,
+        )
+        return _fallback_response(grounded)
+
+    try:
+        output_text = response_output_text(response)
         if not output_text:
+            logger.warning(
+                "Falling back to grounded personalized explanation because the xAI "
+                "response did not include output text.",
+            )
             return _fallback_response(grounded)
 
         parsed = json.loads(output_text)
     except (ValueError, TypeError, json.JSONDecodeError):
+        logger.warning(
+            "Falling back to grounded personalized explanation because the xAI "
+            "response could not be parsed as JSON.",
+        )
         return _fallback_response(grounded)
 
     overview = _clean_text(parsed.get("overview")) or grounded.overview
@@ -1114,8 +1111,8 @@ async def _generate_with_openai(
 
     return PersonalizedExplanationResponse(
         generated_at=datetime.now(timezone.utc),
-        source="firestore+openai",
-        model=settings.openai_model,
+        source="firestore+xai",
+        model=settings.xai_model,
         prompt_version=PROMPT_VERSION,
         grounded_only=False,
         quick_summary=quick_summary,
@@ -1151,4 +1148,4 @@ async def generate_personalized_explanation(
         conditions=conditions,
         interaction_docs=interaction_docs,
     )
-    return await _generate_with_openai(request=request, grounded=grounded)
+    return await _generate_with_xai(request=request, grounded=grounded)

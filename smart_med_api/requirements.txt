@@ -1,6 +1,8 @@
 fastapi
-uvicorn[standard]
 httpx
-pydantic
 firebase-admin
+openai
+pydantic
+python-dotenv
 python-multipart
+uvicorn[standard]

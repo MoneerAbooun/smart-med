@@ -67,7 +67,7 @@ class ProfileCompletenessItem(BaseModel):
 
 class PersonalizedExplanationResponse(BaseModel):
     generated_at: datetime
-    source: str = "firestore+openai"
+    source: str = "firestore+xai"
     model: str | None = None
     prompt_version: str = "grounded-firestore-v2"
     grounded_only: bool = False

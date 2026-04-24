@@ -8,6 +8,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:smart_med/features/ai/ai.dart';
 import 'package:smart_med/features/interactions/interactions.dart';
 import 'package:smart_med/features/medications/medications.dart';
+import 'package:smart_med/features/medicine_search/medicine_search.dart';
 import 'package:smart_med/features/profile/profile.dart';
 
 class HomePage extends StatefulWidget {
@@ -115,6 +116,15 @@ class _HomePageState extends State<HomePage> {
       MaterialPageRoute(builder: (context) => const AddMedicationPage()),
     );
     _refreshSafetyBrief();
+  }
+
+  Future<void> _openMedicineSearch({XFile? initialImage}) async {
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => MedicineSearchPage(initialImage: initialImage),
+      ),
+    );
   }
 
   Future<void> _continueWithSelectedImage() async {
@@ -666,6 +676,13 @@ class _HomePageState extends State<HomePage> {
                         ),
                       if (selectedImage != null)
                         ElevatedButton.icon(
+                          onPressed: () =>
+                              _openMedicineSearch(initialImage: selectedImage),
+                          icon: const Icon(Icons.image_search_outlined),
+                          label: const Text('Search Medicine'),
+                        ),
+                      if (selectedImage != null)
+                        ElevatedButton.icon(
                           onPressed: _continueWithSelectedImage,
                           icon: const Icon(Icons.upload_file_outlined),
                           label: const Text('Use in Add Medication'),
@@ -710,6 +727,15 @@ class _HomePageState extends State<HomePage> {
                         subtitle:
                             'Open the AI guide for simple explanations, warnings, and safer-use tips.',
                         onTap: _openAiGuide,
+                      ),
+                      const SizedBox(height: 12),
+                      _buildQuickAction(
+                        context: context,
+                        icon: Icons.search_outlined,
+                        title: 'Search Medicine Info',
+                        subtitle:
+                            'Look up a medicine by name or image and review uses, dose, warnings, side effects, interactions, and storage.',
+                        onTap: _openMedicineSearch,
                       ),
                       const SizedBox(height: 12),
                       _buildQuickAction(

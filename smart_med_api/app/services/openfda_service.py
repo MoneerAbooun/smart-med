@@ -8,7 +8,7 @@ OPENFDA_BASE_URL = "https://api.fda.gov/drug/label.json"
 def _first_list_value(record: dict, key: str) -> list[str]:
     value = record.get(key, [])
     if isinstance(value, list):
-        return [str(item) for item in value if item]
+        return [_normalize_whitespace(str(item)) for item in value if str(item).strip()]
     return []
 
 
@@ -57,6 +57,16 @@ def extract_label_sections(record: dict) -> dict[str, list[str]]:
     side_effects = _first_list_value(record, "adverse_reactions") or _first_list_value(record, "stop_use")
     dosage_notes = _first_list_value(record, "dosage_and_administration") or _first_list_value(record, "dosage_forms_and_strengths")
     contraindications = _first_list_value(record, "contraindications")
+    interactions = _to_text_list(record, "drug_interactions", "drug_interactions_table")
+    storage = _to_text_list(record, "storage_and_handling", "how_supplied")
+    disclaimer = _to_text_list(
+        record,
+        "keep_out_of_reach_of_children",
+        "ask_doctor",
+        "ask_doctor_or_pharmacist",
+        "questions",
+        "pregnancy_or_breast_feeding",
+    )
 
     return {
         "generic_name": generic_name,
@@ -67,6 +77,9 @@ def extract_label_sections(record: dict) -> dict[str, list[str]]:
         "side_effects": side_effects,
         "dosage_notes": dosage_notes,
         "contraindications": contraindications,
+        "interactions": interactions,
+        "storage": storage,
+        "disclaimer": disclaimer,
     }
 
 

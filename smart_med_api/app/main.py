@@ -6,6 +6,7 @@ from app.routers.drug_alternatives import router as drug_alternatives_router
 from app.routers.drug_details import router as drug_details_router
 from app.routers.drug_interaction import router as drug_interaction_router
 from app.routers.image_uploads import router as image_uploads_router
+from app.routers.medicine_information import router as medicine_information_router
 from app.routers.personalized_explanation import (
     router as personalized_explanation_router,
 )
@@ -29,6 +30,7 @@ app.include_router(drug_alternatives_router)
 app.include_router(drug_details_router)
 app.include_router(drug_interaction_router)
 app.include_router(image_uploads_router)
+app.include_router(medicine_information_router)
 app.include_router(personalized_explanation_router)
 
 

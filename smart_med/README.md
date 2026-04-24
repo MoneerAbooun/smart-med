@@ -11,8 +11,9 @@ client sends the user's Firebase ID token to the FastAPI backend, which:
 - verifies the Firebase user
 - reads the user's Firestore profile, medications, allergies, and conditions
 - reads `drug_catalog` and optional `drug_interactions` facts from Firestore
-- generates a grounded explanation with OpenAI, or falls back to deterministic
-  Firestore-only wording if the model output is unavailable or unsafe
+- generates a grounded explanation with Grok through xAI's OpenAI-compatible
+  API, or falls back to deterministic Firestore-only wording if the model
+  output is unavailable or unsafe
 
 ## Backend URL
 
