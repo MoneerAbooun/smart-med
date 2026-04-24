@@ -12,6 +12,9 @@ class PersonalizedExplanationRepositoryException implements Exception {
 }
 
 class PersonalizedExplanationRepository {
+  static const String _signInAgainMessage =
+      'Your session expired. Please sign in again to use Smart Med AI features.';
+
   PersonalizedExplanationRepository({
     FirebaseAuth? firebaseAuth,
     ApiClient? apiClient,
@@ -72,26 +75,89 @@ class PersonalizedExplanationRepository {
       );
     }
 
-    final idToken = await user.getIdToken();
-    if (idToken == null || idToken.isEmpty) {
-      throw const PersonalizedExplanationRepositoryException(
-        'Could not get a Firebase ID token for this request.',
-      );
-    }
-
     try {
-      final response = await _apiClient.postJson(
-        path: '/personalized-explanation',
-        headers: <String, String>{'Authorization': 'Bearer $idToken'},
-        body: body,
-      );
-
-      return PersonalizedExplanationResponse.fromMap(response);
+      return await _sendAuthorizedRequest(user: user, body: body);
+    } on PersonalizedExplanationRepositoryException {
+      rethrow;
     } on ApiClientException catch (error) {
-      throw PersonalizedExplanationRepositoryException(error.message);
+      throw PersonalizedExplanationRepositoryException(
+        _friendlyApiErrorMessage(error),
+      );
+    } on FirebaseAuthException {
+      throw const PersonalizedExplanationRepositoryException(
+        _signInAgainMessage,
+      );
     } catch (error) {
       throw PersonalizedExplanationRepositoryException(error.toString());
     }
+  }
+
+  Future<PersonalizedExplanationResponse> _sendAuthorizedRequest({
+    required User user,
+    required Map<String, dynamic> body,
+  }) async {
+    final initialToken = await _getRequiredIdToken(user);
+
+    try {
+      final response = await _postPersonalizedExplanation(
+        body: body,
+        idToken: initialToken,
+      );
+      return PersonalizedExplanationResponse.fromMap(response);
+    } on ApiClientException catch (error) {
+      if (!_shouldRetryWithFreshToken(error)) {
+        rethrow;
+      }
+
+      final refreshedToken = await _getRequiredIdToken(
+        user,
+        forceRefresh: true,
+      );
+      final response = await _postPersonalizedExplanation(
+        body: body,
+        idToken: refreshedToken,
+      );
+      return PersonalizedExplanationResponse.fromMap(response);
+    }
+  }
+
+  Future<String> _getRequiredIdToken(
+    User user, {
+    bool forceRefresh = false,
+  }) async {
+    final idToken = await user.getIdToken(true);
+    if (idToken == null || idToken.isEmpty) {
+      throw const PersonalizedExplanationRepositoryException(
+        _signInAgainMessage,
+      );
+    }
+    return idToken;
+  }
+
+  Future<Map<String, dynamic>> _postPersonalizedExplanation({
+    required Map<String, dynamic> body,
+    required String idToken,
+  }) {
+    return _apiClient.postJson(
+      path: '/personalized-explanation',
+      headers: <String, String>{'Authorization': 'Bearer $idToken'},
+      body: body,
+    );
+  }
+
+  bool _shouldRetryWithFreshToken(ApiClientException error) {
+    final message = error.message.toLowerCase();
+    return error.statusCode == 401 ||
+        message.contains('invalid firebase token') ||
+        message.contains('missing firebase bearer token');
+  }
+
+  String _friendlyApiErrorMessage(ApiClientException error) {
+    if (_shouldRetryWithFreshToken(error)) {
+      return _signInAgainMessage;
+    }
+
+    return error.message;
   }
 }
 

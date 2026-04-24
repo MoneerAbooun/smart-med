@@ -14,7 +14,8 @@ class ApiClientException implements Exception {
 }
 
 class ApiClient {
-  ApiClient({http.Client? httpClient}) : _httpClient = httpClient ?? http.Client();
+  ApiClient({http.Client? httpClient})
+    : _httpClient = httpClient ?? http.Client();
 
   final http.Client _httpClient;
 
@@ -29,14 +30,20 @@ class ApiClient {
     required Map<String, dynamic> body,
     Map<String, String> headers = const <String, String>{},
   }) async {
-    final response = await _httpClient.post(
-      _buildUri(path),
-      headers: <String, String>{
-        'Content-Type': 'application/json',
-        ...headers,
-      },
-      body: jsonEncode(body),
-    );
+    final response = await _httpClient
+        .post(
+          _buildUri(path),
+          headers: {'Content-Type': 'application/json', ...headers},
+          body: jsonEncode(body),
+        )
+        .timeout(
+          const Duration(seconds: 15),
+          onTimeout: () {
+            throw const ApiClientException(
+              'Backend timeout. Check if FastAPI is running and the phone can reach the backend URL.',
+            );
+          },
+        );
 
     Map<String, dynamic>? parsedBody;
     if (response.body.isNotEmpty) {
